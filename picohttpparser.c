@@ -95,6 +95,30 @@
         toklen = buf - tok_start;                                                                                                  \
     } while (0)
 
+static unsigned long TZCNT(unsigned long long in) {
+  unsigned long res;
+  asm("tzcnt %1, %0\n\t" : "=r"(res) : "r"(in));
+  return res;
+}
+// TODO just len
+static int get_len_to_space(const char *buf, const char *buf_end) {
+  const char *orig = buf;
+  __m256i m32 = _mm256_set1_epi8(32);
+  while (1)
+  {
+    __m256i v0 = _mm256_loadu_si256((const __m256i *)buf);
+    __m256i v1 = _mm256_cmpeq_epi8(v0, m32);
+    unsigned long vmask = _mm256_movemask_epi8(v1);
+    if (vmask != 0) {
+        buf += TZCNT(vmask);
+        return buf-orig;
+    }
+    buf += 32;
+    if ( buf >= buf_end ) return -1;
+  }
+}
+
+
 static const char *token_char_map = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
                                     "\0\1\0\1\1\1\1\1\0\0\1\1\0\1\1\0\1\1\1\1\1\1\1\1\1\1\0\0\0\0\0\0"
                                     "\0\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\1\0\0\0\1\1"
@@ -298,6 +322,62 @@ static const char *parse_http_version(const char *buf, const char *buf_end, int 
 }
 
 static const char *parse_headers(const char *buf, const char *buf_end, struct phr_header *headers, size_t *num_headers,
+                                 size_t max_headers, int *ret)
+{
+  unsigned long msk;
+  int i=0, tz; // 32B index
+  unsigned int shifted;
+  const char *sbuf = buf;
+  const char *obuf = buf;
+  int name_or_value = 0;
+
+  __m256i m13 = _mm256_set1_epi8(13); // \r
+  __m256i m58 = _mm256_set1_epi8(58); // :
+
+  do {
+    const char *block_start = obuf+64*i;
+    if ( block_start > buf_end ) { printf("DELME hdr too big\n"); *ret = -1; return NULL; }
+
+    __m256i b0 = _mm256_loadu_si256((const __m256i *) block_start);
+    __m256i b1 = _mm256_loadu_si256((const __m256i *) (block_start+32));
+    msk = (unsigned int) _mm256_movemask_epi8( _mm256_or_si256(_mm256_cmpeq_epi8(b0, m13), _mm256_cmpeq_epi8(b0, m58) ) )  |
+        ((unsigned long) _mm256_movemask_epi8( _mm256_or_si256(_mm256_cmpeq_epi8(b1, m13), _mm256_cmpeq_epi8(b1, m58) ) ) << 32);
+
+    while (1) {
+
+      shifted = buf-block_start;
+      if ( shifted >= 64 ) break;
+      tz = TZCNT((msk >> shifted));
+      if ( tz < 64 ) {
+        buf += tz;
+        if ( name_or_value == 1 ) {
+          if ( *buf == ':' ) { buf += 1; continue; } // : in value field
+          headers[*num_headers].value = sbuf;
+          headers[*num_headers].value_len = buf-sbuf;
+          ++*num_headers;
+          if (*num_headers >= max_headers) { *ret = -1; return NULL; }
+          name_or_value = 0;
+          buf += 2; if ( *buf == '\r' ) { buf+=2; *ret=0; return buf; } // \r\n\r\n marks the end
+        } else {
+          headers[*num_headers].name = sbuf;
+          headers[*num_headers].name_len = buf-sbuf;
+          name_or_value = 1;
+          buf += 2;
+        }
+        sbuf = buf;
+      } else {
+        buf += 64 - shifted;
+        break;
+      }
+
+    }
+    i++;
+  } while ( buf < buf_end );
+  *ret = -1;
+  return buf;
+
+}
+static const char *parse_headers_old(const char *buf, const char *buf_end, struct phr_header *headers, size_t *num_headers,
                                  size_t max_headers, int *ret)
 {
     for (;; ++*num_headers) {
