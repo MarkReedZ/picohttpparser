@@ -24,6 +24,7 @@
  * IN THE SOFTWARE.
  */
 
+#include <stdlib.h>
 #include <assert.h>
 #include <stddef.h>
 #include <string.h>
@@ -336,7 +337,7 @@ static const char *parse_headers(const char *buf, const char *buf_end, struct ph
 
   do {
     const char *block_start = obuf+64*i;
-    if ( block_start > buf_end ) { printf("DELME hdr too big\n"); *ret = -1; return NULL; }
+    if ( block_start > buf_end ) { *ret = -1; return NULL; }
 
     __m256i b0 = _mm256_loadu_si256((const __m256i *) block_start);
     __m256i b1 = _mm256_loadu_si256((const __m256i *) (block_start+32));

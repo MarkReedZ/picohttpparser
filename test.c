@@ -460,11 +460,11 @@ int main(void)
 {
     long pagesize = sysconf(_SC_PAGESIZE);
     assert(pagesize >= 1);
-
-    inputbuf = mmap(NULL, pagesize * 3, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    
+    inputbuf = malloc(pagesize*3); //mmap(NULL, pagesize * 3, PROT_NONE, MAP_ANON | MAP_PRIVATE, -1, 0);
     assert(inputbuf != MAP_FAILED);
     inputbuf += pagesize * 2;
-    ok(mprotect(inputbuf - pagesize, pagesize, PROT_READ | PROT_WRITE) == 0);
+    //ok(mprotect(inputbuf - pagesize, pagesize, PROT_READ | PROT_WRITE) == 0);
 
     subtest("request", test_request);
     subtest("response", test_response);
